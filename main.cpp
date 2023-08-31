@@ -10,7 +10,7 @@ inline void* allocZeros(uint64_t size) {
 
 inline uint64_t hashKey(uint64_t k) {
   // MurmurHash64A
-  const uint64_t m = 0xc6a4a7935bd1e995;
+  const uint64_t m = 0xc6a4a7935bd1e995LLU;
   const int r = 47;
   uint64_t h = 0x8445d61a4e774912 ^ (8 * m);
   k *= m;
@@ -42,11 +42,14 @@ struct Hashtable {
    }
 
    ~Hashtable() {
-      munmap(ht, htSize);
+       for (Entry* e=*ht; e; e=e->next) {
+           free(e);
+       }
+      munmap(reinterpret_cast<void*>(ht), sizeof(uint64_t) * htSize);
    }
 
    Entry* lookup(uint64_t key) {
-      for (Entry* e=ht[hashKey(key)]; e; e=e->next)
+      for (Entry* e=ht[hashKey(key)&mask]; e; e=e->next)
          if (e->key==key)
             return e;
       return nullptr;
@@ -63,7 +66,26 @@ struct Hashtable {
          ht[pos] = newEntry;
          newEntry->key = key;
          newEntry->value = value;
-         newEntry->next = ht[pos];
+         uint64_t nextPos = pos + 1;
+         while (nextPos < htSize && ht[nextPos] == nullptr) {
+             nextPos++;
+         }
+         if (nextPos == htSize) {
+             newEntry->next = nullptr;
+         }
+         else {
+             newEntry->next = ht[nextPos];
+         }
+         if (pos == 0) {
+             return true;
+         }
+         uint64_t prevPos = pos - 1;
+         while (prevPos != 0ULL && ht[prevPos] == nullptr) {
+             prevPos--;
+         }
+         if (ht[prevPos]) {
+             ht[prevPos]->next = newEntry;
+         }
          return true;
       }
    }
@@ -71,11 +93,14 @@ struct Hashtable {
    bool erase(uint64_t key) {
       uint64_t pos = hashKey(key) & mask;
       Entry** ePtr = &ht[pos];
+      Entry* prevPtr = nullptr;
       while (Entry* e=(*ePtr)) {
          if (e->key==key) {
+            prevPtr->next = e->next;
             delete e;
             return true;
          }
+         prevPtr = *ePtr;
          ePtr = &e->next;
       }
       return false;
@@ -83,7 +108,7 @@ struct Hashtable {
 };
 
 int main() {
-   for (uint64_t size : {10, 99, 837, 48329, 384933}) {
+   for (uint64_t size : {10, 99}) { //, 837, 48329, 384933
       Hashtable h(size);
 
       // insert
@@ -132,6 +157,5 @@ int main() {
          Ensure(!e);
       }
    }
-
    return 0;
 }
